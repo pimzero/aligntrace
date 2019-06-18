@@ -30,6 +30,7 @@ enum {
 static struct {
 	FILE* out;
 	char** ignore;
+	char** argv;
 } conf;
 
 static int ptrace_traceme(void) {
@@ -51,7 +52,8 @@ static int ptrace_execve(const char* filename, char* const argv[],
 	if (ptrace_traceme() < 0)
 		err(1, "ptrace_traceme");
 
-	execvpe(filename, argv, envp);
+	if (execvpe(filename, argv, envp) < 0)
+		err(1, "execvpe");
 
 	assert(0);
 }
@@ -297,15 +299,100 @@ static void init_config(void) {
 	conf.ignore = ignored_objects;
 }
 
+enum {
+	FLAG_CONTINUE,
+	FLAG_STOP_PARSING
+};
+
+static int flag_break(char* argv0, char*** argv) {
+	(void) argv0;
+	++*argv;
+
+	return FLAG_STOP_PARSING;
+}
+
+static int flag_ignore(char* argv0, char*** argv) {
+	(void) argv0;
+
+	++*argv;
+	conf.ignore = *argv;
+
+	while (**argv && strcmp("}", **argv))
+		++*argv;
+	if (!**argv)
+		errx(1, "\"-{\" argument without ending \"}\" argument");
+	**argv = NULL;
+
+	return FLAG_CONTINUE;
+}
+
+static int flag_out(char* argv0, char*** argv) {
+	(void) argv0;
+
+	if (!(conf.out = fopen(*++*argv, "w")))
+		err(1, "fopen");
+
+	return FLAG_CONTINUE;
+}
+
+static int flag_help(char* argv0, char*** argv);
+
+static struct {
+	char* flag;
+	int (*func)(char* argv0, char*** argv);
+	char* help;
+} flags[] = {
+	{ "-h", flag_help,   "show this help and exit" },
+	{ "--", flag_break,  "stop argument parsing" },
+	{ "-{", flag_ignore, "ignore libraries between \"-{\" and \"}\"" },
+	{ "-o", flag_out,    "output file" },
+};
+
+static int flag_help(char* argv0, char*** argv) {
+	(void) argv;
+	fprintf(stderr, "%s flags:\n", argv0);
+	for (size_t i = 0; i < arrsze(flags); i++)
+		fprintf(stderr, "  %s\t%s\n", flags[i].flag, flags[i].help);
+
+	exit(0);
+}
+
+static void parse_args(int argc, char** argv) {
+	argc--;
+	char* argv0 = *argv;
+	while (*++argv) {
+		if (!*argv || *argv[0] != '-') {
+			break;
+		}
+		for (size_t i = 0; i < arrsze(flags); i++) {
+			if (strcmp(flags[i].flag, *argv))
+				continue;
+			if (flags[i].func(argv0, &argv))
+				goto stop;
+			goto next;
+		}
+		errx(1, "Unknwon flag \"%s\"\n", *argv);
+		flag_help(argv0, &argv);
+next:
+		;
+	}
+stop:
+	if (!*argv)
+		errx(1, "Missing command");
+
+	conf.argv = argv;
+}
+
 int main(int argc, char** argv, char** envp) {
 	int status;
 
 	init_config();
+	parse_args(argc, argv);
 
 	if (argc < 1)
 		errx(1, "Not enough arguments");
 
-	pid_t pid = ptrace_fork_exec(argv[1], argv + 1, envp);
+	pid_t pid = ptrace_fork_exec(conf.argv[0], conf.argv, envp);
 	if (pid < 0)
 		err(1, "fork");
 
