@@ -335,6 +335,15 @@ static int flag_out(char* argv0, char*** argv) {
 	return FLAG_CONTINUE;
 }
 
+static int print_list_ignore() {
+	fprintf(conf.out, "Ingored libs: {");
+	for (size_t i = 0; conf.ignore[i]; i++)
+		fprintf(conf.out, " %s", conf.ignore[i]);
+	fprintf(conf.out, " }\n");
+
+	return FLAG_CONTINUE;
+}
+
 static int flag_help(char* argv0, char*** argv);
 
 static struct {
@@ -342,17 +351,26 @@ static struct {
 	int (*func)(char* argv0, char*** argv);
 	char* help;
 } flags[] = {
-	{ "-h", flag_help,   "show this help and exit" },
-	{ "--", flag_break,  "stop argument parsing" },
-	{ "-{", flag_ignore, "ignore libraries between \"-{\" and \"}\"" },
-	{ "-o", flag_out,    "output file" },
+	{ "-h", flag_help,   "         \tshow this help and exit" },
+	{ "--", flag_break,  "         \tstop argument parsing" },
+	{ "-{", flag_ignore, " lib... }\tignore libraries between \"-{\" and \"}\"" },
+	{ "-o", flag_out,    " file    \toutput file" },
+	{ "--list-ignored-libs", (void*)print_list_ignore, "\tlist ignored libs" },
 };
+
+static void print_help(char* argv0, int dump_conf) {
+	fprintf(stderr, "%s flags:\n", argv0);
+	for (size_t i = 0; i < arrsze(flags); i++)
+		fprintf(stderr, "  %s%s\n", flags[i].flag, flags[i].help);
+
+	if (dump_conf) {
+		print_list_ignore();
+	}
+}
 
 static int flag_help(char* argv0, char*** argv) {
 	(void) argv;
-	fprintf(stderr, "%s flags:\n", argv0);
-	for (size_t i = 0; i < arrsze(flags); i++)
-		fprintf(stderr, "  %s\t%s\n", flags[i].flag, flags[i].help);
+	print_help(argv0, 1);
 
 	exit(0);
 }
@@ -371,8 +389,9 @@ static void parse_args(int argc, char** argv) {
 				goto stop;
 			goto next;
 		}
-		errx(1, "Unknwon flag \"%s\"\n", *argv);
-		flag_help(argv0, &argv);
+		fprintf(stderr,"Unknwon flag \"%s\"\n", *argv);
+		print_help(argv0, 0);
+		exit(1);
 next:
 		;
 	}
