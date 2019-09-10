@@ -1,5 +1,5 @@
-ACtrace
-=======
+aligntrace
+==========
 
 Yet another x86/ptrace debugger
 
@@ -27,10 +27,18 @@ int my_func() {
 
 	clac();
 
-	/* code that will not be checkde */
+	/* code that will not be checked */
 
 	stac();
 
 	/* Code that will be checked for alignment violation */
 }
 ```
+
+Limitations
+-----------
+
+ - Traces only 1 process/thread
+ - Kind of hackish, probably has false positive and negative
+ - Still slow (lots of unaligned access happen in the C runtime)
+ - Use of non-standard C extensions
