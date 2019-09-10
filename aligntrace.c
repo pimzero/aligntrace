@@ -23,6 +23,7 @@
 enum {
 	PTRACE_EVENT_mmap = 1,
 	PTRACE_EVENT_munmap,
+	PTRACE_EVENT_clone,
 };
 
 static struct {
@@ -41,9 +42,22 @@ static int ptrace_execve(const char* filename, char* const argv[],
 	scmp_filter_ctx ctx = seccomp_init(SCMP_ACT_ALLOW);
 	if (!ctx)
 		err(1, "seccomp_init");
-	if (seccomp_rule_add(ctx, SCMP_ACT_TRACE(PTRACE_EVENT_mmap),
-			     SCMP_SYS(mmap), 0) < 0)
-		err(1, "seccomp_rule_add");
+	struct {
+		int event;
+		int sys;
+	} rules[] = {
+		{ PTRACE_EVENT_mmap, SCMP_SYS(mmap) },
+		{ PTRACE_EVENT_clone, SCMP_SYS(clone) },
+		{ PTRACE_EVENT_clone, SCMP_SYS(fork) },
+		{ PTRACE_EVENT_clone, SCMP_SYS(vfork) },
+	};
+
+	for (size_t i = 0; i < arrsze(rules); i++) {
+		if (seccomp_rule_add(ctx, SCMP_ACT_TRACE(rules[i].event),
+				     rules[i].sys, 0) < 0)
+			err(1, "seccomp_rule_add");
+	}
+
 	if (seccomp_load(ctx) < 0)
 		err(1, "seccomp_load");
 
@@ -79,6 +93,14 @@ static long get_eflags(pid_t pid) {
 static int set_eflags(pid_t pid, long eflags) {
 	size_t eflags_offset = offsetof(struct user_regs_struct, eflags);
 	return ptrace(PTRACE_POKEUSER, pid, eflags_offset, eflags);
+}
+
+static long set_ac(pid_t pid) {
+	return set_eflags(pid, get_eflags(pid) | X86_EFLAGS_AC);
+}
+
+static long clear_ac(pid_t pid) {
+	return set_eflags(pid, get_eflags(pid) & ~(long)(X86_EFLAGS_AC));
 }
 
 static struct user_regs_struct get_regs(pid_t pid) {
@@ -152,8 +174,8 @@ static void add_ignore_range(long long int start, long long int end) {
 static void handle_sigbus(pid_t pid) {
 	struct user_regs_struct regs = get_regs(pid);
 
-	if (set_eflags(pid, get_eflags(pid) & ~(long)(X86_EFLAGS_AC)) < 0)
-		err(1, "set_eflags");
+	if (clear_ac(pid) < 0)
+		err(1, "clear_ac");
 
 	if (ignore_ip(regs.rip))
 		return;
@@ -201,6 +223,18 @@ static void handle_seccomp(pid_t pid) {
 		for (size_t i = 0; conf.ignore[i]; i++)
 			if (fd_in_pid_is(pid, regs.r8, conf.ignore[i]))
 				add_ignore_range(regs.rdi, regs.rdi + regs.rsi);
+		break;
+	case PTRACE_EVENT_clone:
+		if (clear_ac(pid) < 0)
+			err(1, "clear_ac");
+
+		if (ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0)
+			err(1, "ptrace_syscall");
+		if (waitpid(pid, NULL, __WALL) < 0)
+			err(1, "waitpid");
+
+		if (set_ac(pid) < 0)
+			err(1, "set_ac");
 		break;
 	default:
 		fprintf(conf.out, "Unknown seccomp event\n");
@@ -279,7 +313,7 @@ static void handle_signal(pid_t pid, int status) {
 			handle_seccomp(pid);
 		} else {
 			handle_init(pid);
-			set_eflags(pid, get_eflags(pid) | X86_EFLAGS_AC);
+			set_ac(pid);
 		}
 		break;
 	case SIGBUS:
