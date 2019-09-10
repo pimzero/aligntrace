@@ -187,10 +187,16 @@ static void handle_seccomp(pid_t pid) {
 		regs = get_regs(pid);
 		if (!(regs.rdx & PROT_EXEC))
 			break;
+		if (regs.r10 & MAP_ANONYMOUS)
+			break;
 
-		// TODO: Get return address
-		if (!regs.rdi)
-			errx(1, "child mmap(EXEC) without base address");
+		if (!regs.rdi) {
+			if (ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0)
+				err(1, "ptrace_syscall");
+			if (waitpid(pid, NULL, __WALL) < 0)
+				err(1, "waitpid");
+			regs = get_regs(pid);
+		}
 
 		for (size_t i = 0; conf.ignore[i]; i++)
 			if (fd_in_pid_is(pid, regs.r8, conf.ignore[i]))
