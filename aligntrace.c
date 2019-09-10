@@ -11,7 +11,6 @@
 #include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
-#include <sys/types.h>
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -126,7 +125,6 @@ static void pr_backtrace(pid_t pid, size_t bt) {
 	do {
 		if (unw_get_proc_name(&c, buf, sizeof(buf), &off) != 0)
 			break;
-			//errx(1, "unw_get_proc_name");
 		unw_proc_info_t pi;
 		if (unw_get_proc_info(&c, &pi) < 0)
 			errx(1, "unw_get_proc_info");
@@ -264,14 +262,14 @@ static void ignore_range_form_map_entry(struct map_entry* entry) {
 }
 
 static void iterate_maps(pid_t pid, void (*f)(struct map_entry* entry)) {
-	char *line = NULL;
+	char* line = NULL;
 	size_t len = 0;
 	ssize_t nread;
 
 	char fname[127];
 	sprintf(fname, "/proc/%d/maps", pid);
 
-	FILE *stream = fopen(fname, "r");
+	FILE* stream = fopen(fname, "r");
 	if (!stream)
 		err(1, "fopen");
 
@@ -307,7 +305,7 @@ static void handle_init(pid_t pid) {
 
 static void handle_signal(pid_t pid, int status) {
 	int sig = 0, singlestep = 0;
-	switch WSTOPSIG(status) {
+	switch (WSTOPSIG(status)) {
 	case SIGTRAP:
 		if (status>>8 == (SIGTRAP | (PTRACE_EVENT_SECCOMP<<8))) {
 			handle_seccomp(pid);
@@ -342,39 +340,39 @@ enum {
 	FLAG_STOP_PARSING
 };
 
-static int flag_break(char* argv0, char*** argv) {
+static int flag_break(char* argv0, char*** argvp) {
 	(void) argv0;
-	++*argv;
+	++*argvp;
 
 	return FLAG_STOP_PARSING;
 }
 
-static int flag_ignore(char* argv0, char*** argv) {
+static int flag_ignore(char* argv0, char*** argvp) {
 	(void) argv0;
 
-	++*argv;
-	conf.ignore = *argv;
+	++*argvp;
+	conf.ignore = *argvp;
 
-	while (**argv && strcmp("}", **argv))
-		++*argv;
-	if (!**argv)
+	while (**argvp && strcmp("}", **argvp))
+		++*argvp;
+	if (!**argvp)
 		errx(1, "\"-{\" argument without ending \"}\" argument");
-	**argv = NULL;
+	**argvp = NULL;
 
 	return FLAG_CONTINUE;
 }
 
-static int flag_out(char* argv0, char*** argv) {
+static int flag_out(char* argv0, char*** argvp) {
 	(void) argv0;
 
-	if (!(conf.out = fopen(*++*argv, "w")))
+	if (!(conf.out = fopen(*++*argvp, "w")))
 		err(1, "fopen");
 
 	return FLAG_CONTINUE;
 }
 
 static int print_list_ignore() {
-	fprintf(conf.out, "Ingored libs: {");
+	fprintf(conf.out, "Ignored libs: {");
 	for (size_t i = 0; conf.ignore[i]; i++)
 		fprintf(conf.out, " %s", conf.ignore[i]);
 	fprintf(conf.out, " }\n");
@@ -382,14 +380,15 @@ static int print_list_ignore() {
 	return FLAG_CONTINUE;
 }
 
-static int flag_help(char* argv0, char*** argv);
+static int flag_help(char* argv0, char*** argvp);
 
 static struct {
 	char* flag;
-	int (*func)(char* argv0, char*** argv);
+	int (*func)(char* argv0, char*** argvp);
 	char* help;
 } flags[] = {
 	{ "-h", flag_help,   "         \tshow this help and exit" },
+	{ "--help", flag_help, "\tshow this help and exit" },
 	{ "--", flag_break,  "         \tstop argument parsing" },
 	{ "-{", flag_ignore, " lib... }\tignore libraries between \"-{\" and \"}\"" },
 	{ "-o", flag_out,    " file    \toutput file" },
@@ -406,8 +405,8 @@ static void print_help(char* argv0, int dump_conf) {
 	}
 }
 
-static int flag_help(char* argv0, char*** argv) {
-	(void) argv;
+static int flag_help(char* argv0, char*** argvp) {
+	(void) argvp;
 	print_help(argv0, 1);
 
 	exit(0);
@@ -427,7 +426,7 @@ static void parse_args(int argc, char** argv) {
 				goto stop;
 			goto next;
 		}
-		fprintf(stderr,"Unknwon flag \"%s\"\n", *argv);
+		fprintf(stderr,"Unknown flag \"%s\"\n", *argv);
 		print_help(argv0, 0);
 		exit(1);
 next:
@@ -453,7 +452,7 @@ int main(int argc, char** argv, char** envp) {
 	if (pid < 0)
 		err(1, "fork");
 
-	while((pid = waitpid(-1, &status, __WALL)) > 0) {
+	while ((pid = waitpid(-1, &status, __WALL)) > 0) {
 		if (WIFEXITED(status)) {
 			fprintf(conf.out, "child exited with status %d\n",
 				WEXITSTATUS(status));
